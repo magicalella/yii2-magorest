@@ -1,7 +1,7 @@
 <?php
 
 namespace magicalella\magorest;
-
+use Yii;
 use yii\base\Component;
 use yii\base\InvalidConfigException;
 use yii\httpclient\Client;
@@ -40,6 +40,9 @@ class Magorest extends Component
     
     public $log = '';
 
+    const STATUS_SUCCESS = true;
+    const STATUS_ERROR = false;
+
     /**
      * @throws InvalidConfigException
      */
@@ -57,18 +60,7 @@ class Magorest extends Component
             throw new InvalidConfigException('$endpoint not set');
         }
         
-        $this->client = new Client(
-            [
-                'baseUrl' => $this->$endpoint ,
-                'responseConfig' => [
-                    'format' => Client::FORMAT_JSON
-                ],
-            ]
-        );
         
-        if(!$this->access_token){
-            $this->getApiKey();
-        }
         parent::init();
     }
     
@@ -77,9 +69,11 @@ class Magorest extends Component
      */
     private function getApiKey(){
         $data = [];
-        $data['username'] = $this->username;
+        $data['username'] = $this->user;
         $data['password'] = $this->password;
         $json = json_encode($data);
+        $errore ='';
+        $messaggio = '';
         
         $request = $this->client->createRequest()
             ->setMethod('POST')
@@ -102,9 +96,10 @@ class Magorest extends Component
             return true;
         }else {
             //testare CODE del response checkStatusCode()
-            Yii::$app->session->setFlash('error', 'Impossibile connettersi a MAGO');
-            Yii::error(sprintf('ERRORE CHIAMATA ApiKey MAGO :  Impossibile connettersi a MAGO'), __METHOD__);
-            $this->log .= ' ERRORE CHIAMATA ApiKey MAGO :  Impossibile connettersi a MAGO ';
+            $errore = $this->checkStatusCode($response);
+            $messaggio = sprintf('ERRORE CHIAMATA ApiKey MAGO :  Impossibile connettersi a MAGO %s',$messaggio);
+            Yii::error($messaggio, __METHOD__);
+            $this->log .= $messaggio;
             return false;
         }
     }
@@ -133,9 +128,12 @@ class Magorest extends Component
         return $response;
     }
     
-    private function checkLogOff()
+    public function checkLogOff()
     {
+        $errore ='';
+        $messaggio = '';
         $url = 'loginmanager/logoff/'.$this->apiKey;
+        
         $request = $this->client->createRequest()
             ->setMethod('GET')
             ->setUrl($url)
@@ -144,50 +142,146 @@ class Magorest extends Component
                 'Accept: application/json, application/json',
                 'Content-Type: application/json;charset=UTF-8',
                 'ApiKey: ' . $this->apiKey
-            ])
-            ->setContent($data);
+            ]);
+            //->setContent($data);
         $response = $request->send();
         
         if (!$response->isOk) {
-            //testare CODE del response checkStatusCode()
-            Yii::error(sprintf('ERRORE CHIAMATA MAGO %s data : ',$url,print_r($data, true)), __METHOD__);
-            $this->log .= ' ERRORE CHIAMATA MAGO : '.$url;
+            $errore = $this->checkStatusCode($response);
+            $messaggio = sprintf('ERRORE CHIAMATA LogOff MAGO :  URL: %s , ERRORE: %s ',$url , $errore );
+            Yii::error($messaggio, __METHOD__);
+            $this->log .= $messaggio ;
         }
         return $response;
     }
     
     
-    
+    /**
+    In base a status code della risposta ritorna $errore
+    */
     private function checkStatusCode($response)
     {
+        $errore = 'Non riconosciuto';
         //con mappatura tutti errori
-        
+        $code = $response->statusCode;
+        switch($code){
+            case '400':
+                $errore = 'Bad Request';
+            break;
+            case '401':
+                $errore = 'Unauthorized';
+            break;
+            case '404':
+                $errore = 'End Point non trovato';
+            break;
+    }
+        return $errore;
     }
     
     /**
      * Call MAGO function POST
      * @param string $call Name of API function to call
      * @param array $data
-     * @return \stdClass Magorest response
+     * @return response [[
+              'status' true/false
+              'message' messaggio
+              'data' il content restituito dalla CURL che se errore contiene ok e msg altrimenti oggetto richiesto
+          ]
      */
     public function post($call, $data)
     {
+        $response = [];
+        $result = [];
+        $message = '';
+        $status = Self::STATUS_SUCCESS;
+        $content = [];
+        $this->client = new Client(
+            [
+                'baseUrl' => $this->endpoint ,
+                'responseConfig' => [
+                    'format' => Client::FORMAT_JSON
+                ],
+            ]
+        );
+        if(!$this->apiKey){
+            $this->getApiKey();
+        }
+        
         $json = json_encode($data);
-        $result = $this->curl($this->endpoint . $call, $json,'POST');
-        return json_decode($result);
+        $response = $this->curl($this->endpoint . $call, $json,'POST');
+        
+        if($response['status'] == Self::STATUS_SUCCESS){
+            //la chiamata può restituire oggetto desiderato o errori di post 
+            if(isset($response['data']->ok) && !$response['data']->ok){
+                $status = Self::STATUS_ERROR;
+                $message = $response['data']->msg;
+            }else{
+                $content = $response['data'];
+    }
+        }else{
+            //errore nella chiamata
+            $status = Self::STATUS_ERROR;
+            $message = $this->log;    
+        }
+        $result = [
+            'status' => $status,
+            'message' => $message,
+            'data' => $content
+        ];
+        return $result;
     }
     
     /**
      * Call MAGO function GET
      * @param string $call Name of API function to call
      * @param array $data
-     * @return \stdClass Magorest response
+     * @return response [[
+               'status' true/false
+               'message' messaggio
+               'data' il content restituito dalla CURL che se errore contiene ok e msg altrimenti oggetto richiesto
+           ]
      */
+    
     public function get($call, $data)
     {
+        $response = [];
+        $result = [];
+        $message = '';
+        $status = Self::STATUS_SUCCESS;
+        $content = [];
+        $this->client = new Client(
+            [
+                'baseUrl' => $this->endpoint ,
+                'responseConfig' => [
+                    'format' => Client::FORMAT_JSON
+                ],
+            ]
+        );
+        if(!$this->apiKey){
+            $this->getApiKey();
+        }
         $json = json_encode($data);
-        $result = $this->curl($this->endpoint . $call, $json,'GET');
-        return json_decode($result);
+        $response = $this->curl($this->endpoint . $call, $json,'GET');
+        
+        if($response['status'] == Self::STATUS_SUCCESS){
+            //la chiamata può restituire oggetto desiderato o errori di post 
+            if(isset($response['data']->ok) && !$response['data']->ok){
+                $status = Self::STATUS_ERROR;
+                $message = $response['data']->msg;
+            }else{
+                $content = $response['data'];
+    }
+        }else{
+            //errore nella chiamata
+            $status = Self::STATUS_ERROR;
+            $message = $this->log;    
+        }
+        $result = [
+            'status' => $status,
+            'message' => $message,
+            'data' => $content
+        ];
+        return $result;
     }
     
 
@@ -195,11 +289,21 @@ class Magorest extends Component
      * Do request by CURL
      * @param $url
      * @param $data
-     * @return mixed
+     * @return $result [
+         'status' true/false
+         'message' messaggio
+         'data' il content restituito dalla CURL formato json
+     ]
      */
     private function curl($url, $data, $method = 'POST')
     {
+        $errore ='';
+        $messaggio = '';
+        $status = Self::STATUS_SUCCESS;
         $response = false;
+        $result = [];
+        $content = [];
+        
 //         $ch = curl_init($url);
 //         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $type_request);
 //         curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
@@ -226,13 +330,24 @@ class Magorest extends Component
         $response = $request->send();
         
         if (!$response->isOk) {
-            //testare CODE del response checkStatusCode()
-            Yii::error(sprintf('ERRORE CHIAMATA MAGO %s data : ',$url,print_r($data, true)), __METHOD__);
-            $this->log .= ' ERRORE CHIAMATA MAGO : '.$url;
+            $status = Self::STATUS_ERROR;
+            $errore = $this->checkStatusCode($response);
+            $messaggio = sprintf('ERRORE CHIAMATA CURL MAGO :  URL: %s , ERRORE: %s , DATA json: %s ',$url , $errore ,print_r($data,true) );
+            Yii::error($messaggio, __METHOD__);
+            $this->log .= $messaggio ;
+        }else{
+            if($response->content != ''){
+                $content = json_decode($response->content);
         }
+        }
+         
         //dopo ogni chiamata chiudo sessione
-        $this->checkLogOff();
-        return $response;
+        //$this->checkLogOff();
+        return $result = [
+            'status' => $status,
+            'message' => $messaggio,
+            'data' => $content
+        ];
     }
 
 
