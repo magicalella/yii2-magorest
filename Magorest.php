@@ -328,13 +328,15 @@ class Magorest extends Component
             ])
             ->setContent($data);
         $response = $request->send();
-        
+        // echo $url.' ';
+        // print_r($response);
+        // exit();
         if (!$response->isOk) {
             $status = Self::STATUS_ERROR;
             $errore = $this->checkStatusCode($response);
             $messaggio = sprintf('ERRORE CHIAMATA CURL MAGO :  URL: %s , ERRORE: %s , DATA json: %s ',$url , $errore ,print_r($data,true) );
             Yii::error($messaggio, __METHOD__);
-            $this->log .= $messaggio ;
+            $this->log = $messaggio ;
         }else{
             if($response->content != ''){
                 $content = json_decode($response->content);
