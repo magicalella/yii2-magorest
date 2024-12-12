@@ -11,7 +11,7 @@ use yii\httpclient\Client;
  * Magorest component
  * @package magicalella\magorest
  *
- * @author Mariusz Stróż <info@inwave.pl>
+ * @author Raffaella Lollini
  */
 class Magorest extends Component
 {
